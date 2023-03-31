@@ -33,12 +33,19 @@ public class ScanKernel {
         let scratchElementCount = ScanKernel.buildScratchPyramid(capacity: capacity).last!
         self.scratchBuffer = device.makeBuffer(
             length: MemoryLayout<UInt32>.stride * scratchElementCount)!
+        self.scratchBuffer.label = "ScanKernel Scratch Buffer"
         
         let library = try device.makeDefaultLibrary(bundle: Bundle.module)
-        self.scanKernel = try device.makeComputePipelineState(
-            function: library.makeFunction(name: "scan_\(ScanKernel.BlockSize)")!)
-        self.uniformAddKernel = try device.makeComputePipelineState(
-            function: library.makeFunction(name: "uniform_add_\(ScanKernel.BlockSize)")!)
+        
+        let descriptor1 = MTLComputePipelineDescriptor()
+        descriptor1.computeFunction = library.makeFunction(name: "scan_\(ScanKernel.BlockSize)")!
+        descriptor1.label = "Scan Kernel (Phase 1)"
+        self.scanKernel = try device.makeComputePipelineState(descriptor: descriptor1, options: [], reflection: nil)
+        
+        let descriptor2 = MTLComputePipelineDescriptor()
+        descriptor2.computeFunction = library.makeFunction(name: "uniform_add_\(ScanKernel.BlockSize)")!
+        descriptor2.label = "Scan Kernel (Phase 2)"
+        self.uniformAddKernel = try device.makeComputePipelineState(descriptor: descriptor2, options: [], reflection: nil)
     }
     
     public func encodeScan(
@@ -50,6 +57,7 @@ public class ScanKernel {
         let pyramid = ScanKernel.buildScratchPyramid(capacity: count)
         
         struct Stage {
+            let level: Int
             let inputBuffer: MTLBuffer
             let inputOffset: Int
             let outputBuffer: MTLBuffer
@@ -58,6 +66,7 @@ public class ScanKernel {
         }
         let stages = (0..<(pyramid.count - 1)).map { level in
             Stage.init(
+                level: level,
                 inputBuffer: level == 0 ? input : scratchBuffer,
                 inputOffset: level == 0 ? 0 : elementStride * pyramid[level - 1],
                 outputBuffer: scratchBuffer,
@@ -74,6 +83,7 @@ public class ScanKernel {
         
         for stage in stages {
             if let encoder = commandBuffer.makeComputeCommandEncoder() {
+                encoder.label = "Scan Kernel (Phase 1, Level \(stage.level))"
                 encoder.setComputePipelineState(scanKernel)
                 encoder.setBuffer(stage.inputBuffer, offset: stage.inputOffset, index: 0)
                 encoder.setBuffer(stage.outputBuffer, offset: stage.outputOffset, index: 1)
@@ -86,6 +96,7 @@ public class ScanKernel {
         
         for stage in stages.reversed() {
             if let encoder = commandBuffer.makeComputeCommandEncoder() {
+                encoder.label = "Scan Kernel (Phase 2, Level \(stage.level))"
                 encoder.setComputePipelineState(uniformAddKernel)
                 encoder.setBuffer(stage.inputBuffer, offset: stage.inputOffset, index: 0)
                 encoder.setBuffer(stage.outputBuffer, offset: stage.outputOffset, index: 1)
