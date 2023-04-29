@@ -77,7 +77,9 @@ public class ScanKernel {
         if let encoder = commandBuffer.makeBlitCommandEncoder() {
             let rangeStart = elementStride * pyramid[0]
             let rangeEnd = elementStride * pyramid[pyramid.count - 2]
-            encoder.fill(buffer: scratchBuffer, range: rangeStart..<rangeEnd, value: 0)
+            if rangeStart < rangeEnd-1 {
+                encoder.fill(buffer: scratchBuffer, range: rangeStart..<rangeEnd, value: 0)
+            }
             encoder.endEncoding()
         }
         
